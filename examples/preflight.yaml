@@ -1,0 +1,28 @@
+# Preflight Configuration Example
+# Place in repository root as 'preflight.yaml' or pass via '--config <path>'
+
+# Target environment context: development, staging, or production
+# Production raises environment criticality weighting to 5.0/5
+environment: production
+
+# Output format: terminal, json, or markdown
+format: terminal
+
+# Deployment blocking policy:
+# Fail deployment if any finding reaches or exceeds this severity level:
+# Options: low, moderate, high, critical (or leave commented out for no severity-based gate)
+fail_on: high
+
+# List of specific rule IDs that unconditionally block deployment
+blocked_rules:
+  - AWS-DB-001  # Block any database deletion or recreation
+  - AWS-NET-001 # Block public SSH/RDP ingress
+
+# Allowed / suppressed rule IDs (e.g., acknowledged exceptions)
+allowed_rules: []
+
+# Maximum allowed overall plan risk score (0.0 to 100.0)
+max_score: 75.0
+
+# Verbose output for diagnostics
+verbose: false

@@ -1,0 +1,49 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.8.5",
+  "resource_changes": [
+    {
+      "address": "aws_security_group.internal_app",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "internal_app",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "internal-app-sg",
+          "description": "Allow internal HTTPS traffic from private VPC",
+          "ingress": [
+            {
+              "description": "Internal HTTPS",
+              "from_port": 443,
+              "to_port": 443,
+              "protocol": "tcp",
+              "cidr_blocks": ["10.0.0.0/16"],
+              "ipv6_cidr_blocks": []
+            }
+          ]
+        },
+        "after_unknown": {
+          "id": true
+        }
+      }
+    },
+    {
+      "address": "data.aws_caller_identity.current",
+      "mode": "data",
+      "type": "aws_caller_identity",
+      "name": "current",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["read"],
+        "before": null,
+        "after": {
+          "account_id": "123456789012"
+        },
+        "after_unknown": {}
+      }
+    }
+  ]
+}
