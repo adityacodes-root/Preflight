@@ -1,0 +1,84 @@
+name: Terraform Plan Preflight Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "*.tf"
+
+# Least-privilege permissions: only write to pull-requests comments if authorized, read contents
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preflight-analysis:
+    name: Validate Terraform Changes
+    runs-on: ubuntu-latest
+    # Prevent leaking secrets or running privileged steps on untrusted forks
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Preflight
+        run: pip install preflight-engine
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.8.5"
+
+      # Assume read-only / plan-only cloud credentials via OIDC
+      # DO NOT grant apply or administrator roles to PR plan checks
+      # - name: Configure AWS Credentials (OIDC)
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: arn:aws:iam::123456789012:role/terraform-speculative-plan-role
+      #     aws-region: us-east-1
+
+      - name: Initialize and Generate Plan
+        run: |
+          terraform init -input=false
+          terraform plan -input=false -out=tfplan
+          terraform show -json tfplan > plan.json
+
+      - name: Run Preflight Analysis
+        id: preflight
+        run: |
+          # Run Preflight and generate sanitized markdown report
+          preflight analyze plan.json \
+            --environment staging \
+            --format markdown \
+            --output preflight-report.md \
+            --fail-on high
+
+      - name: Publish Sanitized PR Comment
+        if: always() && steps.preflight.outcome != 'skipped'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('preflight-report.md')) {
+              const body = fs.readFileSync('preflight-report.md', 'utf8');
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
+
+      - name: Clean up Plan Artifacts
+        if: always()
+        run: |
+          # Always destroy raw plan files containing potential secrets before runner teardown
+          rm -f tfplan plan.json preflight-report.md
