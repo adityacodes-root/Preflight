@@ -1,0 +1,28 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.8.5",
+  "resource_changes": [
+    {
+      "address": "aws_db_instance.analytics",
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "analytics",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["delete", "create"],
+        "replace_paths": [["identifier"], ["engine_version"]],
+        "before": {
+          "identifier": "analytics-db",
+          "engine": "mysql",
+          "engine_version": "8.0"
+        },
+        "after": {
+          "identifier": "analytics-db-v2",
+          "engine": "mysql",
+          "engine_version": "8.4"
+        },
+        "after_unknown": {}
+      }
+    }
+  ]
+}
