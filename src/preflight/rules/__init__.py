@@ -6,13 +6,28 @@ from preflight.rules.aws import (
     AwsPublicAdminIngressRule,
     AwsS3PublicAccessBlockRule,
 )
+from preflight.rules.azure import (
+    AzureDatabaseDeletionReplacementRule,
+    AzureKeyVaultPurgeProtectionRule,
+    AzureNsgPublicAdminIngressRule,
+    AzureStoragePublicAccessRule,
+)
 from preflight.rules.base import Rule, RuleContext
+from preflight.rules.gcp import (
+    GcpFirewallPublicAdminIngressRule,
+    GcpSqlDeletionProtectionRule,
+    GcpStoragePublicAccessRule,
+)
 from preflight.rules.generic import (
     GenericDestructiveChangeRule,
     GenericResourceDeletionRule,
     GenericResourceReplacementRule,
     GenericUnknownActionRule,
     GenericUnknownValuesRule,
+)
+from preflight.rules.kubernetes import (
+    KubernetesClusterAdminBindingRule,
+    KubernetesWorkloadSecurityRule,
 )
 
 
@@ -30,6 +45,18 @@ def get_default_rules() -> list[Rule]:
         AwsS3PublicAccessBlockRule(),
         AwsIamWildcardRule(),
         AwsDatabaseDeletionReplacementRule(),
+        # Azure rules
+        AzureNsgPublicAdminIngressRule(),
+        AzureStoragePublicAccessRule(),
+        AzureKeyVaultPurgeProtectionRule(),
+        AzureDatabaseDeletionReplacementRule(),
+        # GCP rules
+        GcpFirewallPublicAdminIngressRule(),
+        GcpStoragePublicAccessRule(),
+        GcpSqlDeletionProtectionRule(),
+        # Kubernetes rules
+        KubernetesWorkloadSecurityRule(),
+        KubernetesClusterAdminBindingRule(),
     ]
 
 
@@ -46,4 +73,13 @@ __all__ = [
     "AwsS3PublicAccessBlockRule",
     "AwsIamWildcardRule",
     "AwsDatabaseDeletionReplacementRule",
+    "AzureNsgPublicAdminIngressRule",
+    "AzureStoragePublicAccessRule",
+    "AzureKeyVaultPurgeProtectionRule",
+    "AzureDatabaseDeletionReplacementRule",
+    "GcpFirewallPublicAdminIngressRule",
+    "GcpStoragePublicAccessRule",
+    "GcpSqlDeletionProtectionRule",
+    "KubernetesWorkloadSecurityRule",
+    "KubernetesClusterAdminBindingRule",
 ]

@@ -18,7 +18,7 @@ Measured across synthetic benchmarks and automated test suites:
 | **Analysis Latency** | **< 0.50 ms** avg per plan | Sub-millisecond static evaluation |
 | **Detection Rate** | **100%** (11/11 target scenarios) | Synthetic test fixtures |
 | **False Positive Rate** | **0** on control fixtures | Clean control plans produce 0 findings |
-| **Test Coverage** | **90%** statement coverage | 76 unit and integration tests |
+| **Test Coverage** | **88%** statement coverage | 102 unit and integration tests |
 | **Type Safety** | **100%** strictly typed | `mypy --strict` with zero warnings |
 | **Code Quality** | **Zero errors** | Compliant with `ruff` linter and formatter |
 | **Scoring Determinism** | **100% bit-for-bit identical** | Zero drift across 50 sequential runs |
@@ -84,6 +84,32 @@ preflight analyze plan.json --format json --output report.json
 
 ---
 
+## CI/CD & GitHub Integration
+
+Preflight integrates directly into CI/CD pipelines to automate infrastructure risk gates and pull request reviews.
+
+### Pull Request Sticky Comments (`preflight comment`)
+Posts an infrastructure risk analysis directly to active pull requests. Subsequent commits update the comment in place to prevent notification noise. Repository, token, and PR number are resolved automatically from environment variables (`GITHUB_REPOSITORY`, `GITHUB_TOKEN`, and `GITHUB_REF`).
+
+```bash
+# In GitHub Actions
+terraform show -json tfplan | preflight comment - --fail-on high
+
+# Local test or manual invocation
+preflight comment plan.json --repo owner/repo --pr 42 --token $GITHUB_TOKEN --dry-run
+```
+
+### SARIF Code Scanning (`--format sarif`)
+Exports findings in OASIS SARIF v2.1.0 to surface inline risk annotations in GitHub Code Scanning, GitLab Security Dashboards, or Azure DevOps.
+
+```bash
+terraform show -json tfplan | preflight analyze - --format sarif --output preflight.sarif
+```
+
+See [.github/workflows/terraform-pr-check.yml](.github/workflows/terraform-pr-check.yml) for a complete GitHub Actions workflow.
+
+---
+
 ## Risk Scoring Model
 
 Preflight scores risks from `0.0` to `100.0` using five weighted dimensions:
@@ -122,6 +148,21 @@ Overall plan risk is calculated as the maximum resource-level risk score to prev
 - `AWS-S3-001`: S3 Public Access Block removal or disabled settings (`block_public_acls`, `block_public_policy`, etc.), or public bucket ACLs.
 - `AWS-IAM-001`: Context-sensitive IAM wildcard policies (`*` on `*` is Critical; service-level wildcards on `*` is High).
 - `AWS-DB-001`: Deletion or replacement of RDS instances, Aurora clusters, DynamoDB tables, or ElastiCache clusters.
+
+### Azure Rules
+- `AZR-NET-001`: Network Security Group (NSG) rules allowing `0.0.0.0/0` or `Internet` to ports 22, 3389, or wildcard `*`.
+- `AZR-STG-001`: Storage account public blob access or missing firewall restrictions.
+- `AZR-KV-001`: Azure Key Vault changes with `purge_protection_enabled = false` or soft delete retention < 7 days.
+- `AZR-DB-001`: Deletion or replacement of Azure SQL, Cosmos DB, or PostgreSQL flexible servers.
+
+### Google Cloud Rules
+- `GCP-FW-001`: Ingress compute firewall rules allowing `0.0.0.0/0` or `::/0` to sensitive administrative ports (22, 3389) or all traffic.
+- `GCP-IAM-001`: Cloud Storage bucket IAM bindings or members granting access to `allUsers` or `allAuthenticatedUsers`.
+- `GCP-SQL-001`: Cloud SQL instance deletion, replacement, or disabling `deletion_protection`.
+
+### Kubernetes Rules
+- `K8S-SEC-001`: Workloads or Helm charts deploying with `security_context.privileged: true` or `hostNetwork: true`.
+- `K8S-RBAC-001`: RoleBindings and ClusterRoleBindings binding to superuser role `cluster-admin`.
 
 ---
 
