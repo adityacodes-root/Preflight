@@ -1,6 +1,7 @@
 """Input layer: Read, validate, and normalize Terraform plan JSON."""
 
 import json
+import sys
 from pathlib import Path
 
 from preflight.models import ActionType, PlanSummary, ResourceChange
@@ -11,11 +12,17 @@ class PlanParseError(Exception):
 
 
 def parse_plan_file(plan_path: str | Path) -> tuple[list[ResourceChange], PlanSummary]:
-    """Read and validate a Terraform plan JSON file.
+    """Read and validate a Terraform plan JSON file or stdin stream."""
+    path_str = str(plan_path)
+    if path_str == "-":
+        try:
+            content = sys.stdin.read()
+        except OSError as exc:
+            raise PlanParseError(f"Failed to read from standard input: {exc}") from exc
+        if not content.strip():
+            raise PlanParseError("Standard input is empty.")
+        return parse_plan_json(content)
 
-    Returns a list of parsed ResourceChange instances and a PlanSummary.
-    Raises PlanParseError with actionable diagnostics on failure.
-    """
     path = Path(plan_path)
     if not path.exists():
         raise PlanParseError(f"Plan file not found: '{path}'. Ensure the path is correct.")

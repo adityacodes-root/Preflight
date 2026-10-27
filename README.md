@@ -4,8 +4,7 @@ Preflight is an infrastructure change risk analysis engine that parses Terraform
 
 ```bash
 terraform plan -out=tfplan
-terraform show -json tfplan > plan.json
-preflight analyze plan.json
+terraform show -json tfplan | preflight analyze -
 ```
 
 ---
@@ -19,7 +18,7 @@ Measured across synthetic benchmarks and automated test suites:
 | **Analysis Latency** | **< 0.50 ms** avg per plan | Sub-millisecond static evaluation |
 | **Detection Rate** | **100%** (11/11 target scenarios) | Synthetic test fixtures |
 | **False Positive Rate** | **0** on control fixtures | Clean control plans produce 0 findings |
-| **Test Coverage** | **89%** statement coverage | 55 unit and integration tests |
+| **Test Coverage** | **89%** statement coverage | 61 unit and integration tests |
 | **Type Safety** | **100%** strictly typed | `mypy --strict` with zero warnings |
 | **Code Quality** | **Zero errors** | Compliant with `ruff` linter and formatter |
 | **Scoring Determinism** | **100% bit-for-bit identical** | Zero drift across 50 sequential runs |
@@ -45,6 +44,11 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
+# Pipe directly via stdin (recommended for CI/CD)
+terraform show -json tfplan | preflight analyze -
+terraform show -json tfplan | preflight analyze - --fail-on high
+
+# Analyze a local plan file
 preflight analyze plan.json
 preflight analyze plan.json --fail-on high
 preflight analyze plan.json --environment staging

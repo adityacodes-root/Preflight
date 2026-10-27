@@ -101,3 +101,26 @@ def test_cli_analyze_invalid_config(tmp_path: Path) -> None:
     result = runner.invoke(app, ["analyze", safe_path, "--config", str(cfg_file)])
     assert result.exit_code == 2
     assert "Configuration Error" in result.output
+
+
+def test_cli_analyze_stdin_success() -> None:
+    safe_path = Path(__file__).parent.parent / "examples" / "safe-plan.json"
+    content = safe_path.read_text(encoding="utf-8")
+    result = runner.invoke(app, ["analyze", "-"], input=content)
+    assert result.exit_code == 0
+    assert "PREFLIGHT" in result.stdout
+    assert "<stdin>" in result.stdout
+
+
+def test_cli_analyze_stdin_policy_failure() -> None:
+    risky_path = Path(__file__).parent.parent / "examples" / "risky-plan.json"
+    content = risky_path.read_text(encoding="utf-8")
+    result = runner.invoke(app, ["analyze", "-", "--fail-on", "high"], input=content)
+    assert result.exit_code == 1
+    assert "DEPLOYMENT BLOCKED BY POLICY" in result.stdout
+
+
+def test_cli_analyze_stdin_empty() -> None:
+    result = runner.invoke(app, ["analyze", "-"], input="")
+    assert result.exit_code == 2
+    assert "Standard input is empty" in result.output

@@ -69,9 +69,9 @@ def main_callback(
 )
 def analyze(
     plan_path: Annotated[
-        Path,
+        str,
         typer.Argument(
-            help="Path to Terraform plan JSON file (generated via 'terraform show -json <tfplan>').",
+            help="Path to Terraform plan JSON file or '-' to read from stdin.",
             show_default=False,
         ),
     ],

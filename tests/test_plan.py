@@ -138,3 +138,33 @@ def test_parse_plan_root_not_object() -> None:
 def test_parse_plan_resource_changes_not_array() -> None:
     with pytest.raises(PlanParseError, match="'resource_changes' must be an array"):
         parse_plan_json('{"format_version": "1.2", "resource_changes": "not_an_array"}')
+
+
+def test_parse_plan_stdin_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    safe_path = Path(__file__).parent.parent / "examples" / "safe-plan.json"
+    content = safe_path.read_text(encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", pytest.MonkeyPatch().context(), raising=False)
+    from io import StringIO
+
+    monkeypatch.setattr("sys.stdin", StringIO(content))
+    changes, summary = parse_plan_file("-")
+    assert summary.total_resources == 2
+    assert len(changes) == 2
+
+
+def test_parse_plan_stdin_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    from io import StringIO
+
+    monkeypatch.setattr("sys.stdin", StringIO("   \n"))
+    with pytest.raises(PlanParseError, match="Standard input is empty"):
+        parse_plan_file("-")
+
+
+def test_parse_plan_stdin_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FailingStdin:
+        def read(self) -> str:
+            raise OSError("I/O failure")
+
+    monkeypatch.setattr("sys.stdin", FailingStdin())
+    with pytest.raises(PlanParseError, match="Failed to read from standard input"):
+        parse_plan_file("-")

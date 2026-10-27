@@ -33,8 +33,9 @@ class PreflightEngine:
     ) -> AnalysisResult:
         """Run analysis directly on a plan file."""
         resource_changes, summary = parse_plan_file(plan_path)
+        identifier = "<stdin>" if str(plan_path) == "-" else str(plan_path)
         return self._run_analysis(
-            plan_path=str(plan_path),
+            plan_path=identifier,
             resource_changes=resource_changes,
             summary=summary,
             environment=environment,
