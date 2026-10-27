@@ -18,7 +18,7 @@ Measured across synthetic benchmarks and automated test suites:
 | **Analysis Latency** | **< 0.50 ms** avg per plan | Sub-millisecond static evaluation |
 | **Detection Rate** | **100%** (11/11 target scenarios) | Synthetic test fixtures |
 | **False Positive Rate** | **0** on control fixtures | Clean control plans produce 0 findings |
-| **Test Coverage** | **89%** statement coverage | 61 unit and integration tests |
+| **Test Coverage** | **90%** statement coverage | 76 unit and integration tests |
 | **Type Safety** | **100%** strictly typed | `mypy --strict` with zero warnings |
 | **Code Quality** | **Zero errors** | Compliant with `ruff` linter and formatter |
 | **Scoring Determinism** | **100% bit-for-bit identical** | Zero drift across 50 sequential runs |
@@ -48,6 +48,12 @@ pip install -e ".[dev]"
 terraform show -json tfplan | preflight analyze -
 terraform show -json tfplan | preflight analyze - --fail-on high
 
+# Publish or update sticky PR comment in CI
+terraform show -json tfplan | preflight comment - --fail-on high
+
+# Generate SARIF report for GitHub Code Scanning
+terraform show -json tfplan | preflight analyze - --format sarif --output preflight.sarif
+
 # Analyze a local plan file
 preflight analyze plan.json
 preflight analyze plan.json --fail-on high
@@ -61,7 +67,7 @@ preflight analyze plan.json --format json --output report.json
 | Option | Flag | Description | Default |
 |---|---|---|---|
 | `--environment` | `-e` | `development`, `staging`, or `production` | `production` |
-| `--format` | `-f` | `terminal`, `json`, or `markdown` | `terminal` |
+| `--format` | `-f` | `terminal`, `json`, `markdown`, or `sarif` | `terminal` |
 | `--fail-on` | | Block if findings reach: `low`, `moderate`, `high`, `critical` | *None* |
 | `--output` | `-o` | Output file path | stdout |
 | `--config` | `-c` | Custom YAML configuration path | `preflight.yaml` |

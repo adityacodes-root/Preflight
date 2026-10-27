@@ -6,9 +6,12 @@ from pathlib import Path
 from preflight.engine import PreflightEngine
 from preflight.models import Environment
 from preflight.reporting import (
+    PR_COMMENT_MARKER,
     get_terminal_report_str,
     render_json_report,
     render_markdown_report,
+    render_pr_comment,
+    render_sarif_report,
 )
 
 
@@ -64,3 +67,52 @@ def test_markdown_report_structure() -> None:
     assert "## Risk Findings" in md
     assert "AWS-DB-001" in md
     assert "### 1. [" in md
+
+
+def test_sarif_report_structure() -> None:
+    fixture_path = Path(__file__).parent.parent / "examples" / "risky-plan.json"
+    engine = PreflightEngine()
+    result = engine.analyze_file(fixture_path, Environment.PRODUCTION)
+
+    sarif_str = render_sarif_report(result)
+    sarif = json.loads(sarif_str)
+
+    assert sarif["version"] == "2.1.0"
+    assert "$schema" in sarif
+    assert len(sarif["runs"]) == 1
+
+    run = sarif["runs"][0]
+    assert run["tool"]["driver"]["name"] == "Preflight"
+    assert len(run["tool"]["driver"]["rules"]) > 0
+    assert len(run["results"]) == len(result.findings)
+
+    first_result = run["results"][0]
+    assert "ruleId" in first_result
+    assert "level" in first_result
+    assert first_result["level"] in ("error", "warning", "note")
+    assert len(first_result["locations"]) > 0
+
+
+def test_sarif_report_empty_findings() -> None:
+    fixture_path = Path(__file__).parent.parent / "examples" / "safe-plan.json"
+    engine = PreflightEngine()
+    result = engine.analyze_file(fixture_path, Environment.PRODUCTION)
+
+    sarif_str = render_sarif_report(result)
+    sarif = json.loads(sarif_str)
+    assert len(sarif["runs"][0]["results"]) == 0
+
+
+def test_pr_comment_structure() -> None:
+    fixture_path = Path(__file__).parent.parent / "examples" / "risky-plan.json"
+    engine = PreflightEngine()
+    result = engine.analyze_file(fixture_path, Environment.PRODUCTION)
+
+    comment = render_pr_comment(result)
+    assert PR_COMMENT_MARKER in comment
+    assert "## Preflight Infrastructure Risk Analysis" in comment
+    assert "**CRITICAL**" in comment
+    assert "### Planned Resource Operations" in comment
+    assert "<details" in comment
+    assert "<summary>" in comment
+    assert "AWS-DB-001" in comment

@@ -7,16 +7,16 @@ on:
       - "terraform/**"
       - "*.tf"
 
-# Least-privilege permissions: only write to pull-requests comments if authorized, read contents
+# Least-privilege permissions: write pull-requests comments, write security events for SARIF
 permissions:
   contents: read
   pull-requests: write
+  security-events: write
 
 jobs:
   preflight-analysis:
     name: Validate Terraform Changes
     runs-on: ubuntu-latest
-    # Prevent leaking secrets or running privileged steps on untrusted forks
     if: github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
@@ -36,49 +36,34 @@ jobs:
         with:
           terraform_version: "1.8.5"
 
-      # Assume read-only / plan-only cloud credentials via OIDC
-      # DO NOT grant apply or administrator roles to PR plan checks
-      # - name: Configure AWS Credentials (OIDC)
-      #   uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: arn:aws:iam::123456789012:role/terraform-speculative-plan-role
-      #     aws-region: us-east-1
-
       - name: Initialize and Generate Plan
         run: |
           terraform init -input=false
           terraform plan -input=false -out=tfplan
-          terraform show -json tfplan > plan.json
 
-      - name: Run Preflight Analysis
-        id: preflight
+      - name: Generate and Upload SARIF to GitHub Code Scanning
         run: |
-          # Run Preflight and generate sanitized markdown report
-          preflight analyze plan.json \
+          terraform show -json tfplan | preflight analyze - \
             --environment staging \
-            --format markdown \
-            --output preflight-report.md \
-            --fail-on high
+            --format sarif \
+            --output preflight.sarif
 
-      - name: Publish Sanitized PR Comment
-        if: always() && steps.preflight.outcome != 'skipped'
-        uses: actions/github-script@v7
+      - name: Upload SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            if (fs.existsSync('preflight-report.md')) {
-              const body = fs.readFileSync('preflight-report.md', 'utf8');
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-            }
+          sarif_file: preflight.sarif
+
+      - name: Publish Sticky PR Risk Report
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          terraform show -json tfplan | preflight comment - \
+            --environment staging \
+            --fail-on high
 
       - name: Clean up Plan Artifacts
         if: always()
         run: |
-          # Always destroy raw plan files containing potential secrets before runner teardown
-          rm -f tfplan plan.json preflight-report.md
+          rm -f tfplan preflight.sarif

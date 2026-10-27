@@ -1,19 +1,22 @@
-"""Reporting layer: Renders terminal, JSON, and Markdown reports."""
+"""Reporting layer: Renders terminal, JSON, Markdown, SARIF, and PR comment reports."""
 
 import json
 from io import StringIO
-from typing import TextIO
+from typing import Any, TextIO
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from preflight import __version__
 from preflight.models import (
     AnalysisResult,
     RiskCategory,
     Severity,
 )
+
+PR_COMMENT_MARKER = "<!-- preflight-comment-marker -->"
 
 # Color palettes for severities and risk bands
 SEVERITY_STYLES = {
@@ -143,14 +146,12 @@ def render_markdown_report(result: AnalysisResult) -> str:
 
     policy = result.policy_evaluation
     if policy.blocked:
-        lines.append("> 🛑 **Deployment Blocked by Preflight Policy**\n")
+        lines.append("> **Deployment Blocked by Preflight Policy**\n")
         for reason in policy.blocking_reasons:
             lines.append(f"> - {reason}")
         lines.append("")
     else:
-        lines.append(
-            "> ✅ **Preflight Passed** — No configured blocking policies were triggered.\n"
-        )
+        lines.append("> **Preflight Passed** — No configured blocking policies were triggered.\n")
 
     # Overview table
     lines.append("## Overview\n")
@@ -216,3 +217,188 @@ def get_terminal_report_str(result: AnalysisResult) -> str:
     buf = StringIO()
     render_terminal_report(result, file=buf)
     return buf.getvalue()
+
+
+def _severity_to_sarif_level(severity: Severity) -> str:
+    if severity in (Severity.CRITICAL, Severity.HIGH):
+        return "error"
+    if severity == Severity.MODERATE:
+        return "warning"
+    return "note"
+
+
+def _severity_to_security_score(severity: Severity) -> str:
+    if severity == Severity.CRITICAL:
+        return "9.0"
+    if severity == Severity.HIGH:
+        return "7.5"
+    if severity == Severity.MODERATE:
+        return "5.0"
+    return "2.5"
+
+
+def render_sarif_report(result: AnalysisResult, indent: int = 2) -> str:
+    """Render analysis findings as an OASIS SARIF v2.1.0 document."""
+    rules_dict: dict[str, dict[str, Any]] = {}
+    sarif_results: list[dict[str, Any]] = []
+
+    artifact_uri = "plan.json" if result.plan_path in ("-", "<stdin>") else result.plan_path
+
+    for finding in result.findings:
+        if finding.rule_id not in rules_dict:
+            rules_dict[finding.rule_id] = {
+                "id": finding.rule_id,
+                "name": finding.rule_id.replace("-", ""),
+                "shortDescription": {"text": finding.rule_name},
+                "fullDescription": {"text": finding.why_it_matters},
+                "help": {
+                    "text": finding.remediation,
+                    "markdown": (
+                        f"### Remediation\n\n{finding.remediation}\n\n"
+                        f"### Why It Matters\n\n{finding.why_it_matters}"
+                    ),
+                },
+                "defaultConfiguration": {
+                    "level": _severity_to_sarif_level(finding.severity),
+                },
+                "properties": {
+                    "precision": "high",
+                    "security-severity": _severity_to_security_score(finding.severity),
+                    "tags": ["security", "infrastructure", "terraform"],
+                },
+            }
+
+    sorted_rule_ids = sorted(rules_dict.keys())
+    rules_list = [rules_dict[rid] for rid in sorted_rule_ids]
+    rule_index_map = {rid: idx for idx, rid in enumerate(sorted_rule_ids)}
+
+    for finding in result.findings:
+        sarif_results.append(
+            {
+                "ruleId": finding.rule_id,
+                "ruleIndex": rule_index_map[finding.rule_id],
+                "level": _severity_to_sarif_level(finding.severity),
+                "message": {
+                    "text": (
+                        f"{finding.what_changed}\n\n"
+                        f"Why it matters: {finding.why_it_matters}\n"
+                        f"Remediation: {finding.remediation}"
+                    ),
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": artifact_uri,
+                                "uriBaseId": "%SRCROOT%",
+                            },
+                            "region": {
+                                "startLine": 1,
+                                "startColumn": 1,
+                            },
+                        },
+                        "logicalLocations": [
+                            {
+                                "name": finding.resource_address,
+                                "kind": "resource",
+                                "fullyQualifiedName": f"{finding.resource_type}.{finding.resource_address}",
+                            }
+                        ],
+                    }
+                ],
+                "properties": {
+                    "resourceAddress": finding.resource_address,
+                    "resourceType": finding.resource_type,
+                    "action": finding.action.value,
+                    "riskScore": finding.calculated_score,
+                    "severity": finding.severity.value,
+                },
+            }
+        )
+
+    sarif_doc = {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "Preflight",
+                        "semanticVersion": __version__,
+                        "informationUri": "https://github.com/preflight-engine/preflight",
+                        "rules": rules_list,
+                    }
+                },
+                "results": sarif_results,
+            }
+        ],
+    }
+
+    return json.dumps(sarif_doc, indent=indent)
+
+
+def render_pr_comment(result: AnalysisResult) -> str:
+    """Render a collapsible, sticky markdown comment for GitHub pull requests."""
+    cat_badge = f"**{result.overall_risk_category.value.upper()}**"
+    policy_badge = "**BLOCKED**" if result.policy_evaluation.blocked else "**PASSED**"
+
+    lines: list[str] = [
+        PR_COMMENT_MARKER,
+        "## Preflight Infrastructure Risk Analysis\n",
+        "| Status | Risk Score | Environment | Policy Gate |",
+        "| :---: | :---: | :---: | :---: |",
+        f"| {cat_badge} | **{result.overall_risk_score:.1f} / 100** | `{result.environment.value.upper()}` | {policy_badge} |\n",
+    ]
+
+    if result.policy_evaluation.blocked:
+        lines.append("> **Deployment Blocked by Policy:**")
+        for reason in result.policy_evaluation.blocking_reasons:
+            lines.append(f"> - {reason}")
+        lines.append("")
+
+    summary = result.summary
+    lines.append("### Planned Resource Operations\n")
+    lines.append("| Create | Update | Delete | Replace | Read / No-op | Unknown Actions |")
+    lines.append("| :---: | :---: | :---: | :---: | :---: | :---: |")
+    lines.append(
+        f"| {summary.to_create} | {summary.to_update} | {summary.to_delete} | "
+        f"{summary.to_replace} | {summary.to_read} / {summary.to_noop} | {summary.unknown_actions} |\n"
+    )
+
+    if not result.findings:
+        lines.append("### Findings\n")
+        lines.append(
+            "> **No risk findings detected.** All planned changes are within acceptable thresholds.\n"
+        )
+    else:
+        lines.append(f"### Risk Findings ({len(result.findings)})\n")
+        for idx, finding in enumerate(result.findings, start=1):
+            open_attr = " open" if idx <= 3 or finding.severity == Severity.CRITICAL else ""
+            lines.append(f"<details{open_attr}>")
+            lines.append(
+                f"<summary><b>[{finding.rule_id}] {finding.rule_name} — {finding.severity.value.upper()} (Score: {finding.calculated_score:.1f})</b></summary>\n"
+            )
+            lines.append(
+                f"- **Resource:** `{finding.resource_address}` (`{finding.resource_type}`)"
+            )
+            lines.append(f"- **Action:** `{finding.action.value.upper()}`")
+            lines.append(f"- **What Changed:** {finding.what_changed}")
+            lines.append(f"- **Why It Matters:** {finding.why_it_matters}")
+
+            rf = finding.risk_factors
+            lines.append(
+                f"- **Risk Factors:** Impact: `{rf.change_impact:.1f}/5` | "
+                f"Security: `{rf.security_exposure:.1f}/5` | "
+                f"Reversibility: `{rf.reversibility:.1f}/5` | "
+                f"Env: `{rf.environment_criticality:.1f}/5` | "
+                f"Uncertainty: `{rf.uncertainty:.1f}/5`"
+            )
+            lines.append(f"- **Remediation:** {finding.remediation}\n")
+            lines.append("</details>\n")
+
+    lines.append("---")
+    lines.append(
+        "*Updated automatically by [Preflight](https://github.com/preflight-engine/preflight) — Infrastructure Change Risk Analysis Engine.*"
+    )
+
+    return "\n".join(lines)

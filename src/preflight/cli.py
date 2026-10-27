@@ -22,12 +22,15 @@ if hasattr(sys.stderr, "reconfigure"):
 from preflight import __version__
 from preflight.config import ConfigError, load_config
 from preflight.engine import PreflightEngine
+from preflight.github import GitHubApiError, post_or_update_pr_comment, resolve_github_context
 from preflight.models import Environment, Severity
 from preflight.plan import PlanParseError
 from preflight.policy import PolicyEvaluator
 from preflight.reporting import (
     render_json_report,
     render_markdown_report,
+    render_pr_comment,
+    render_sarif_report,
     render_terminal_report,
 )
 
@@ -88,7 +91,7 @@ def analyze(
         typer.Option(
             "--format",
             "-f",
-            help="Output format: terminal, json, or markdown.",
+            help="Output format: terminal, json, markdown, or sarif.",
         ),
     ] = None,
     fail_on: Annotated[
@@ -140,9 +143,9 @@ def analyze(
         sys.exit(2)
 
     effective_format = (format_type or config.format).strip().lower()
-    if effective_format not in ("terminal", "json", "markdown"):
+    if effective_format not in ("terminal", "json", "markdown", "sarif"):
         err_console.print(
-            f"[bold red]Invalid Format:[/bold red] '{effective_format}'. Valid options: terminal, json, markdown."
+            f"[bold red]Invalid Format:[/bold red] '{effective_format}'. Valid options: terminal, json, markdown, sarif."
         )
         sys.exit(2)
 
@@ -207,6 +210,19 @@ def analyze(
         else:
             typer.echo(md_output)
 
+    elif effective_format == "sarif":
+        sarif_output = render_sarif_report(result)
+        if output:
+            try:
+                output.write_text(sarif_output, encoding="utf-8")
+            except OSError as exc:
+                err_console.print(
+                    f"[bold red]Output Error:[/bold red] Failed to write to '{output}': {exc}"
+                )
+                sys.exit(2)
+        else:
+            typer.echo(sarif_output)
+
     else:  # terminal
         if output:
             try:
@@ -221,6 +237,173 @@ def analyze(
             render_terminal_report(result)
 
     # 6. Exit code
+    if result.policy_evaluation.blocked:
+        sys.exit(1)
+    sys.exit(0)
+
+
+@app.command(
+    name="comment",
+    help="Analyze a plan and publish or update a sticky GitHub Pull Request comment.",
+)
+def comment(
+    plan_path: Annotated[
+        str,
+        typer.Argument(
+            help="Path to Terraform plan JSON file or '-' to read from stdin.",
+            show_default=False,
+        ),
+    ],
+    pr: Annotated[
+        int | None,
+        typer.Option(
+            "--pr",
+            "-p",
+            help="Pull request number (defaults to PR_NUMBER or GITHUB_REF in CI).",
+        ),
+    ] = None,
+    repo: Annotated[
+        str | None,
+        typer.Option(
+            "--repo",
+            "-R",
+            help="Target repository 'owner/repo' (defaults to GITHUB_REPOSITORY).",
+        ),
+    ] = None,
+    token: Annotated[
+        str | None,
+        typer.Option(
+            "--token",
+            "-t",
+            help="GitHub API token (defaults to GITHUB_TOKEN or GH_TOKEN).",
+        ),
+    ] = None,
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Target environment (development, staging, production).",
+        ),
+    ] = None,
+    fail_on: Annotated[
+        str | None,
+        typer.Option(
+            "--fail-on",
+            help="Block deployment if findings meet or exceed this severity.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Render the comment markdown without calling the GitHub API.",
+        ),
+    ] = False,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Save the rendered comment markdown to a file.",
+        ),
+    ] = None,
+    config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to preflight configuration file (YAML).",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose output.",
+        ),
+    ] = False,
+) -> None:
+    """Analyze a plan and publish or update a sticky GitHub Pull Request comment."""
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        err_console.print(f"[bold red]Configuration Error:[/bold red] {exc}")
+        sys.exit(2)
+
+    effective_env_str = environment or config.environment
+    try:
+        effective_env = Environment.from_str(effective_env_str)
+    except ValueError as exc:
+        err_console.print(f"[bold red]Environment Error:[/bold red] {exc}")
+        sys.exit(2)
+
+    effective_fail_on_str = fail_on or config.fail_on
+    effective_fail_on: Severity | None = None
+    if effective_fail_on_str:
+        try:
+            effective_fail_on = Severity.from_str(effective_fail_on_str)
+        except ValueError as exc:
+            err_console.print(f"[bold red]Policy Error:[/bold red] {exc}")
+            sys.exit(2)
+
+    policy_evaluator = PolicyEvaluator(
+        fail_on_severity=effective_fail_on,
+        blocked_rules=config.blocked_rules,
+        allowed_rules=config.allowed_rules,
+        max_allowed_score=config.max_score,
+    )
+
+    engine = PreflightEngine()
+    try:
+        result = engine.analyze_file(
+            plan_path=plan_path,
+            environment=effective_env,
+            policy_evaluator=policy_evaluator,
+        )
+    except PlanParseError as exc:
+        err_console.print(f"[bold red]Plan Parse Error:[/bold red] {exc}")
+        sys.exit(2)
+    except Exception as exc:
+        err_console.print(f"[bold red]Execution Error:[/bold red] {exc}")
+        if verbose:
+            err_console.print_exception()
+        sys.exit(2)
+
+    comment_body = render_pr_comment(result)
+
+    if output:
+        try:
+            output.write_text(comment_body, encoding="utf-8")
+        except OSError as exc:
+            err_console.print(
+                f"[bold red]Output Error:[/bold red] Failed to write to '{output}': {exc}"
+            )
+            sys.exit(2)
+
+    if dry_run:
+        typer.echo(comment_body)
+    else:
+        try:
+            resolved_repo, resolved_pr, resolved_token = resolve_github_context(
+                repo=repo, pr=pr, token=token
+            )
+            resp = post_or_update_pr_comment(
+                repo=resolved_repo,
+                pr_number=resolved_pr,
+                token=resolved_token,
+                comment_body=comment_body,
+            )
+            action = resp.get("action", "posted")
+            url = resp.get("url", "")
+            err_console.print(
+                f"[bold green]PR Comment {action.capitalize()}:[/bold green] {resolved_repo}#{resolved_pr} {url}".strip()
+            )
+        except GitHubApiError as exc:
+            err_console.print(f"[bold red]GitHub Comment Error:[/bold red] {exc}")
+            sys.exit(2)
+
     if result.policy_evaluation.blocked:
         sys.exit(1)
     sys.exit(0)

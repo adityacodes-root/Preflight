@@ -2,7 +2,9 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
+import pytest
 from typer.testing import CliRunner
 
 from preflight.cli import app
@@ -124,3 +126,54 @@ def test_cli_analyze_stdin_empty() -> None:
     result = runner.invoke(app, ["analyze", "-"], input="")
     assert result.exit_code == 2
     assert "Standard input is empty" in result.output
+
+
+def test_cli_analyze_sarif_format() -> None:
+    safe_path = str(Path(__file__).parent.parent / "examples" / "safe-plan.json")
+    result = runner.invoke(app, ["analyze", safe_path, "--format", "sarif"])
+    assert result.exit_code == 0
+    sarif = json.loads(result.stdout)
+    assert sarif["version"] == "2.1.0"
+    assert sarif["runs"][0]["tool"]["driver"]["name"] == "Preflight"
+
+
+def test_cli_comment_dry_run() -> None:
+    safe_path = str(Path(__file__).parent.parent / "examples" / "safe-plan.json")
+    result = runner.invoke(app, ["comment", safe_path, "--dry-run"])
+    assert result.exit_code == 0
+    assert "<!-- preflight-comment-marker -->" in result.stdout
+    assert "## Preflight Infrastructure Risk Analysis" in result.stdout
+
+
+def test_cli_comment_missing_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.delenv("PR_NUMBER", raising=False)
+    monkeypatch.delenv("GITHUB_REF", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    safe_path = str(Path(__file__).parent.parent / "examples" / "safe-plan.json")
+    result = runner.invoke(app, ["comment", safe_path])
+    assert result.exit_code == 2
+    assert "GitHub repository not specified" in result.output
+
+
+def test_cli_comment_post_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def mock_post(repo: str, pr_number: int, token: str, comment_body: str) -> dict[str, Any]:
+        calls.append({"repo": repo, "pr": pr_number, "token": token, "body": comment_body})
+        return {"action": "updated", "comment_id": 42, "url": "https://github.com/comment/42"}
+
+    monkeypatch.setattr("preflight.cli.post_or_update_pr_comment", mock_post)
+
+    safe_path = str(Path(__file__).parent.parent / "examples" / "safe-plan.json")
+    result = runner.invoke(
+        app,
+        ["comment", safe_path, "--repo", "my-org/repo", "--pr", "99", "--token", "ghp_mock"],
+    )
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["repo"] == "my-org/repo"
+    assert calls[0]["pr"] == 99
+    assert "PR Comment Updated" in result.output

@@ -56,8 +56,10 @@ class PreflightConfig(BaseModel):
     @classmethod
     def validate_format(cls, v: str) -> str:
         normalized = v.strip().lower()
-        if normalized not in ("terminal", "json", "markdown"):
-            raise ValueError(f"Invalid format '{v}'. Valid options: terminal, json, markdown.")
+        if normalized not in ("terminal", "json", "markdown", "sarif"):
+            raise ValueError(
+                f"Invalid format '{v}'. Valid options: terminal, json, markdown, sarif."
+            )
         return normalized
 
     @field_validator("max_score")
