@@ -1,6 +1,7 @@
 """CLI integration tests covering commands, exit codes, and flag permutations."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,11 @@ from typer.testing import CliRunner
 from preflight.cli import app
 
 runner = CliRunner()
+ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI_REGEX.sub("", text)
 
 
 def test_cli_version() -> None:
@@ -21,15 +27,17 @@ def test_cli_version() -> None:
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Terraform Integration Workflow" in result.stdout
-    assert "terraform show -json tfplan | preflight analyze -" in result.stdout
+    clean = strip_ansi(result.stdout)
+    assert "Terraform Integration Workflow" in clean
+    assert "terraform show -json tfplan | preflight analyze -" in clean
 
 
 def test_cli_analyze_help() -> None:
     result = runner.invoke(app, ["analyze", "--help"])
     assert result.exit_code == 0
-    assert "Terraform Usage Examples" in result.stdout
-    assert "--fail-on" in result.stdout
+    clean = strip_ansi(result.stdout)
+    assert "Terraform Usage Examples" in clean
+    assert "--fail-on" in clean
 
 
 def test_cli_analyze_safe_plan() -> None:
