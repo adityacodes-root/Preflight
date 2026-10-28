@@ -50,7 +50,16 @@ dev = [
     "ruff>=0.4.0",
     "mypy>=1.10.0",
     "types-PyYAML>=6.0.12",
+    "build>=1.2.0",
+    "twine>=5.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/adityacodes-root/Preflight"
+Documentation = "https://github.com/adityacodes-root/Preflight#readme"
+Repository = "https://github.com/adityacodes-root/Preflight.git"
+Issues = "https://github.com/adityacodes-root/Preflight/issues"
+Changelog = "https://github.com/adityacodes-root/Preflight/releases"
 
 [project.scripts]
 preflight = "preflight.cli:main"

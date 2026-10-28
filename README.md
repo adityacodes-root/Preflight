@@ -29,15 +29,35 @@ Measured across synthetic benchmarks and automated test suites:
 
 Requires Python 3.12+.
 
+### Recommended: Standalone CLI with `pipx`
+Installs `preflight` into an isolated global environment so the binary is directly available in any terminal:
+
 ```bash
-git clone https://github.com/preflight-engine/preflight.git
-cd preflight
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# Install from PyPI:
+pipx install preflight-engine
+
+# Or install directly from GitHub:
+pipx install git+https://github.com/adityacodes-root/Preflight.git
 ```
 
-*Package name:* The executable is `preflight`. The distribution package on PyPI is `preflight-engine` to avoid collision with an existing legacy package.
+### With `uv` (Fastest)
+```bash
+uv tool install preflight-engine
+```
+
+### Standard `pip`
+```bash
+pip install preflight-engine
+```
+
+### From Source (Development)
+```bash
+git clone https://github.com/adityacodes-root/Preflight.git
+cd preflight
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+```
 
 ---
 
