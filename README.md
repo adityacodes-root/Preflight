@@ -1,11 +1,20 @@
 # Preflight
 
-Preflight is an infrastructure change risk analysis engine that parses Terraform plan JSON to detect destructive operations, security regressions, and architectural risks before deployment.
+**Infrastructure change risk analysis and CI/CD safety gate for Terraform execution plans.**
+
+Static linters (`Checkov`, `tfsec`) inspect `.tf` code syntax, but miss runtime state transitions, like an immutable attribute change forcing Terraform to delete and recreate a production database.
+
+**Preflight inspects the actual execution plan graph (`tfplan`)** to catch destructive replacements, quantify blast radius, and block risky deployments before `terraform apply`.
 
 ```bash
 terraform plan -out=tfplan
-terraform show -json tfplan | preflight analyze -
+terraform show -json tfplan | preflight analyze - --fail-on high
 ```
+
+* **Zero-Disk Streaming**: Ingest plans via stdin pipe (`analyze -`) so unencrypted plan secrets never touch the runner disk.
+* **Deterministic Risk Scoring**: Logarithmic blast-radius calculation across 5 weighted dimensions with environment criticality tiers.
+* **Multi-Cloud Policy Suite**: Built-in detection rules for AWS, Azure, Google Cloud, Kubernetes, and core Terraform lifecycle actions.
+* **CI/CD Native Gate**: Enforces POSIX exit codes (`0` Pass, `1` Block, `2` Error), posts GitHub PR sticky comments, and exports SARIF v2.1.0.
 
 ---
 
@@ -80,6 +89,11 @@ preflight analyze plan.json --fail-on high
 preflight analyze plan.json --environment staging
 preflight analyze plan.json --format markdown --output report.md
 preflight analyze plan.json --format json --output report.json
+
+# Command reference
+preflight --help
+preflight analyze --help
+preflight comment --help
 ```
 
 ### Options
@@ -93,6 +107,7 @@ preflight analyze plan.json --format json --output report.json
 | `--config` | `-c` | Custom YAML configuration path | `preflight.yaml` |
 | `--verbose` | `-v` | Show traceback on error | `false` |
 | `--version` | `-V` | Display version | |
+| `--help` | | Help and options | |
 
 ### Exit Codes
 
