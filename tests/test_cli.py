@@ -18,6 +18,20 @@ def test_cli_version() -> None:
     assert "preflight 0.1.0" in result.stdout
 
 
+def test_cli_help() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "Terraform Integration Workflow" in result.stdout
+    assert "terraform show -json tfplan | preflight analyze -" in result.stdout
+
+
+def test_cli_analyze_help() -> None:
+    result = runner.invoke(app, ["analyze", "--help"])
+    assert result.exit_code == 0
+    assert "Terraform Usage Examples" in result.stdout
+    assert "--fail-on" in result.stdout
+
+
 def test_cli_analyze_safe_plan() -> None:
     safe_path = str(Path(__file__).parent.parent / "examples" / "safe-plan.json")
     result = runner.invoke(app, ["analyze", safe_path])

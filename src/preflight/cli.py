@@ -36,11 +36,128 @@ from preflight.reporting import (
 
 err_console = Console(stderr=True)
 
+MAIN_HELP = """\
+[bold]Preflight[/bold]: Infrastructure Change Risk Analysis Engine for Terraform plans.
+
+Analyzes Terraform execution plans to detect destructive operations, security
+regressions, and architectural risks before changes reach production.
+"""
+
+MAIN_EPILOG = """\
+[bold green]Terraform Integration Workflow:[/bold green]
+
+  [bold cyan]Workflow A: Direct Stdin Stream (Zero disk artifacts - Recommended for CI/CD)[/bold cyan]
+    $ terraform plan -out=tfplan
+    $ terraform show -json tfplan | preflight analyze - --fail-on high
+
+  [bold cyan]Workflow B: Local Plan File Analysis[/bold cyan]
+    $ terraform plan -out=tfplan
+    $ terraform show -json tfplan > plan.json
+    $ preflight analyze plan.json --environment production
+
+  [bold cyan]Workflow C: GitHub Pull Request Sticky Comment Gate[/bold cyan]
+    $ terraform show -json tfplan | preflight comment - --fail-on high
+
+  [bold cyan]Workflow D: GitHub Code Scanning & SARIF Upload[/bold cyan]
+    $ terraform show -json tfplan | preflight analyze - --format sarif --output preflight.sarif
+
+[bold green]Supported Cloud Providers & Detection Rules:[/bold green]
+
+  [bold cyan]AWS (AWS-*)[/bold cyan]
+    • AWS-NET-001: Security group ingress allowing SSH (22), RDP (3389), or all traffic to 0.0.0.0/0
+    • AWS-S3-001:  S3 Public Access Block removal or disabled settings; public bucket ACLs
+    • AWS-IAM-001: Permissive IAM wildcard policies (* on * is Critical; service-level wildcards is High)
+    • AWS-DB-001:  Deletion or replacement of RDS instances, Aurora clusters, DynamoDB, or ElastiCache
+
+  [bold cyan]Azure (AZR-*)[/bold cyan]
+    • AZR-NET-001: Network Security Group (NSG) rules allowing Internet to ports 22, 3389, or wildcard *
+    • AZR-STG-001: Storage account public blob access or missing firewall restrictions
+    • AZR-KV-001:  Azure Key Vault changes with purge protection disabled or soft delete retention < 7 days
+    • AZR-DB-001:  Deletion or replacement of Azure SQL, Cosmos DB, or PostgreSQL flexible servers
+
+  [bold cyan]Google Cloud (GCP-*)[/bold cyan]
+    • GCP-FW-001:  Ingress compute firewall rules allowing 0.0.0.0/0 to ports 22, 3389, or all protocols
+    • GCP-IAM-001: Cloud Storage bucket IAM bindings granting access to allUsers or allAuthenticatedUsers
+    • GCP-SQL-001: Cloud SQL instance deletion, replacement, or disabling deletion_protection
+
+  [bold cyan]Kubernetes & Helm (K8S-*)[/bold cyan]
+    • K8S-SEC-001: Workloads deploying with container privileged: true or hostNetwork/hostPID/hostIPC
+    • K8S-RBAC-001: RoleBindings and ClusterRoleBindings binding to superuser role cluster-admin
+
+  [bold cyan]Generic (GEN-*)[/bold cyan]
+    • GEN-DEL-001: Permanent resource deletion in Terraform plan
+    • GEN-REP-001: Resource replacement (destroy and recreate due to immutable attribute changes)
+    • GEN-DST-001: Destructive changes targeting stateful infrastructure (databases, volumes, clusters)
+    • GEN-UNK-001: Computed unknown values present in critical configuration fields
+    • GEN-ACT-001: Unrecognized or unsupported Terraform lifecycle action sequences
+
+[bold green]CI/CD Gate Exit Codes:[/bold green]
+
+  [bold]0 (Pass)[/bold]   Analysis completed successfully. No configured policy conditions were violated.
+  [bold]1 (Block)[/bold]  Deployment blocked. A configured policy threshold (--fail-on) or blocked rule triggered.
+  [bold]2 (Error)[/bold]  Execution error. Plan file not found, invalid JSON syntax, or bad configuration.
+
+[bold green]Documentation & Repository:[/bold green]
+  https://github.com/adityacodes-root/Preflight
+"""
+
+ANALYZE_EPILOG = """\
+[bold green]Terraform Usage Examples & Patterns:[/bold green]
+
+  [bold cyan]1. Stream directly via pipe (recommended in CI/CD pipelines):[/bold cyan]
+    $ terraform show -json tfplan | preflight analyze -
+
+  [bold cyan]2. Block CI/CD pipeline on High or Critical severity findings:[/bold cyan]
+    $ terraform show -json tfplan | preflight analyze - --fail-on high
+
+  [bold cyan]3. Set environment criticality (development, staging, production):[/bold cyan]
+    $ preflight analyze plan.json --environment production
+
+  [bold cyan]4. Export as SARIF v2.1.0 for GitHub Code Scanning / Security Tab:[/bold cyan]
+    $ terraform show -json tfplan | preflight analyze - --format sarif --output preflight.sarif
+
+  [bold cyan]5. Export JSON report for downstream scripts or Slack / webhook bots:[/bold cyan]
+    $ preflight analyze plan.json --format json --output report.json
+
+  [bold cyan]6. Export Markdown report for pull requests or documentation:[/bold cyan]
+    $ preflight analyze plan.json --format markdown --output report.md
+
+  [bold cyan]7. Load custom organization policy file (preflight.yaml):[/bold cyan]
+    $ preflight analyze plan.json --config .preflight.yaml
+
+[bold green]Exit Codes:[/bold green]
+  0 = Pass (Changes safe or below threshold)
+  1 = Block (Severity threshold met or blocked rule violated)
+  2 = Error (Invalid JSON, bad arguments, or file read error)
+"""
+
+COMMENT_EPILOG = """\
+[bold green]GitHub Actions CI/CD Usage:[/bold green]
+
+  [bold cyan]1. Automatic Context Resolution (Standard GitHub Actions workflow):[/bold cyan]
+    In CI, GITHUB_REPOSITORY, GITHUB_TOKEN, and PR numbers (from GITHUB_REF)
+    are detected automatically. Subsequent runs update the comment in place:
+
+    - name: Preflight PR Risk Gate
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        terraform show -json tfplan | preflight comment - --fail-on high
+
+  [bold cyan]2. Local Dry-Run (preview markdown without calling GitHub API):[/bold cyan]
+    $ preflight comment plan.json --dry-run --fail-on high
+
+  [bold cyan]3. Explicit Parameters (Custom runners, external PRs, or testing):[/bold cyan]
+    $ preflight comment plan.json --repo owner/repo --pr 42 --token $GITHUB_TOKEN
+"""
+
 app = typer.Typer(
     name="preflight",
-    help="Preflight: Infrastructure Change Risk Analysis Engine.",
+    help=MAIN_HELP,
+    epilog=MAIN_EPILOG,
     no_args_is_help=True,
     add_completion=False,
+    rich_markup_mode="rich",
 )
 
 
@@ -68,13 +185,14 @@ def main_callback(
 
 @app.command(
     name="analyze",
-    help="Analyze a Terraform plan JSON file for infrastructure risk.",
+    help="Analyze a Terraform plan JSON file or stdin stream for infrastructure risk.",
+    epilog=ANALYZE_EPILOG,
 )
 def analyze(
     plan_path: Annotated[
         str,
         typer.Argument(
-            help="Path to Terraform plan JSON file or '-' to read from stdin.",
+            help="Path to Terraform plan JSON file or '-' to read from stdin pipe.",
             show_default=False,
         ),
     ],
@@ -245,12 +363,13 @@ def analyze(
 @app.command(
     name="comment",
     help="Analyze a plan and publish or update a sticky GitHub Pull Request comment.",
+    epilog=COMMENT_EPILOG,
 )
 def comment(
     plan_path: Annotated[
         str,
         typer.Argument(
-            help="Path to Terraform plan JSON file or '-' to read from stdin.",
+            help="Path to Terraform plan JSON file or '-' to read from stdin pipe.",
             show_default=False,
         ),
     ],

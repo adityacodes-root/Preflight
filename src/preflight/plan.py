@@ -15,6 +15,11 @@ def parse_plan_file(plan_path: str | Path) -> tuple[list[ResourceChange], PlanSu
     """Read and validate a Terraform plan JSON file or stdin stream."""
     path_str = str(plan_path)
     if path_str == "-":
+        if hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
+            raise PlanParseError(
+                "Standard input is an interactive terminal. Pipe data in via '|' "
+                "(e.g., terraform show -json tfplan | preflight analyze -) or specify a plan file path."
+            )
         try:
             content = sys.stdin.read()
         except OSError as exc:

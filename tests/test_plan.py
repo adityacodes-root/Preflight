@@ -168,3 +168,13 @@ def test_parse_plan_stdin_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.stdin", FailingStdin())
     with pytest.raises(PlanParseError, match="Failed to read from standard input"):
         parse_plan_file("-")
+
+
+def test_parse_plan_stdin_interactive_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    class InteractiveStdin:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", InteractiveStdin())
+    with pytest.raises(PlanParseError, match="Standard input is an interactive terminal"):
+        parse_plan_file("-")

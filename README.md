@@ -18,7 +18,7 @@ Measured across synthetic benchmarks and automated test suites:
 | **Analysis Latency** | **< 0.50 ms** avg per plan | Sub-millisecond static evaluation |
 | **Detection Rate** | **100%** (11/11 target scenarios) | Synthetic test fixtures |
 | **False Positive Rate** | **0** on control fixtures | Clean control plans produce 0 findings |
-| **Test Coverage** | **88%** statement coverage | 102 unit and integration tests |
+| **Test Coverage** | **88%** statement coverage | 105 unit and integration tests |
 | **Type Safety** | **100%** strictly typed | `mypy --strict` with zero warnings |
 | **Code Quality** | **Zero errors** | Compliant with `ruff` linter and formatter |
 | **Scoring Determinism** | **100% bit-for-bit identical** | Zero drift across 50 sequential runs |
