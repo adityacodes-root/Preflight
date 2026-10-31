@@ -1,5 +1,7 @@
 """Explainable risk scoring engine for Terraform infrastructure changes."""
 
+import math
+
 from preflight.models import (
     Environment,
     Finding,
@@ -22,6 +24,16 @@ ENV_CRITICALITY_SCORES: dict[Environment, float] = {
     Environment.STAGING: 3.0,
     Environment.PRODUCTION: 5.0,
 }
+
+
+def calculate_logarithmic_blast_radius(
+    base_impact: float,
+    affected_count: int = 1,
+    scale: float = 1.0,
+) -> float:
+    if affected_count <= 1:
+        return min(5.0, max(0.0, base_impact))
+    return min(5.0, max(0.0, round(base_impact + scale * math.log(affected_count), 2)))
 
 
 def calculate_factor_score(
@@ -74,6 +86,38 @@ def score_finding(
     return resolved_factors, score
 
 
+def compound_risk_factors_logarithmic(
+    primary: RiskFactors,
+    secondary_findings: list[Finding],
+    env_crit: float,
+    scale: float = 0.5,
+) -> RiskFactors:
+    """Blend secondary findings into primary risk factors using logarithmic scaling."""
+    if not secondary_findings:
+        return RiskFactors(
+            change_impact=primary.change_impact,
+            security_exposure=primary.security_exposure,
+            reversibility=primary.reversibility,
+            environment_criticality=env_crit,
+            uncertainty=primary.uncertainty,
+        )
+
+    def _compound_dim(primary_val: float, sec_attr: str) -> float:
+        sec_max = max(getattr(f.risk_factors, sec_attr) for f in secondary_findings)
+        delta = max(0.0, sec_max - primary_val)
+        if delta <= 0.0:
+            return primary_val
+        return min(5.0, round(primary_val + scale * math.log(1.0 + delta), 2))
+
+    return RiskFactors(
+        change_impact=_compound_dim(primary.change_impact, "change_impact"),
+        security_exposure=_compound_dim(primary.security_exposure, "security_exposure"),
+        reversibility=_compound_dim(primary.reversibility, "reversibility"),
+        environment_criticality=env_crit,
+        uncertainty=_compound_dim(primary.uncertainty, "uncertainty"),
+    )
+
+
 def aggregate_resource_risks(
     resources: list[ResourceChange],
     findings: list[Finding],
@@ -96,20 +140,25 @@ def aggregate_resource_risks(
     for res in resources:
         res_findings = findings_by_resource.get(res.address, [])
         if res_findings:
-            # Resource risk factors take the maximum component across its findings
-            max_ci = max(f.risk_factors.change_impact for f in res_findings)
-            max_se = max(f.risk_factors.security_exposure for f in res_findings)
-            max_rev = max(f.risk_factors.reversibility for f in res_findings)
-            max_unc = max(f.risk_factors.uncertainty for f in res_findings)
-
-            res_factors = RiskFactors(
-                change_impact=max_ci,
-                security_exposure=max_se,
-                reversibility=max_rev,
-                environment_criticality=env_crit,
-                uncertainty=max_unc,
+            sorted_findings = sorted(
+                res_findings,
+                key=lambda f: (-f.calculated_score, -f.severity.level, f.rule_id),
             )
-            res_score = calculate_factor_score(max_ci, max_se, max_rev, env_crit, max_unc)
+            primary = sorted_findings[0]
+            secondaries = sorted_findings[1:]
+
+            res_factors = compound_risk_factors_logarithmic(
+                primary=primary.risk_factors,
+                secondary_findings=secondaries,
+                env_crit=env_crit,
+            )
+            res_score = calculate_factor_score(
+                change_impact=res_factors.change_impact,
+                security_exposure=res_factors.security_exposure,
+                reversibility=res_factors.reversibility,
+                environment_criticality=res_factors.environment_criticality,
+                uncertainty=res_factors.uncertainty,
+            )
         else:
             res_factors = RiskFactors(
                 change_impact=0.0,

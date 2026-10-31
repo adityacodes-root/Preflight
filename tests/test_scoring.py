@@ -12,6 +12,8 @@ from preflight.models import (
 from preflight.scoring import (
     aggregate_resource_risks,
     calculate_factor_score,
+    calculate_logarithmic_blast_radius,
+    compound_risk_factors_logarithmic,
     score_finding,
 )
 
@@ -166,3 +168,56 @@ def test_aggregate_resource_risks_maximum_score() -> None:
     assert overall_score == 72.0
     assert category == RiskCategory.HIGH
     assert highest_res == "aws_db_instance.critical_db"
+
+
+def test_calculate_logarithmic_blast_radius() -> None:
+    assert calculate_logarithmic_blast_radius(base_impact=2.0, affected_count=1) == 2.0
+    assert calculate_logarithmic_blast_radius(base_impact=0.0, affected_count=0) == 0.0
+
+    r2 = calculate_logarithmic_blast_radius(base_impact=1.0, affected_count=2)
+    r5 = calculate_logarithmic_blast_radius(base_impact=1.0, affected_count=5)
+    r15 = calculate_logarithmic_blast_radius(base_impact=1.0, affected_count=15)
+
+    assert 1.0 < r2 < r5 < r15 <= 5.0
+
+    clamped = calculate_logarithmic_blast_radius(base_impact=4.5, affected_count=50)
+    assert clamped == 5.0
+
+
+def test_compound_risk_factors_logarithmic() -> None:
+    primary = RiskFactors(
+        change_impact=4.0,
+        security_exposure=1.0,
+        reversibility=4.5,
+        environment_criticality=5.0,
+        uncertainty=0.0,
+    )
+
+    comp_empty = compound_risk_factors_logarithmic(primary, [], env_crit=5.0)
+    assert comp_empty == primary
+
+    sec_finding = Finding(
+        rule_id="SEC-001",
+        rule_name="Security Rule",
+        severity=Severity.HIGH,
+        resource_address="test.res",
+        resource_type="test",
+        action=ActionType.DELETE,
+        what_changed="Sec change",
+        why_it_matters="Sec impact",
+        remediation="Fix it",
+        risk_factors=RiskFactors(
+            change_impact=2.0,
+            security_exposure=5.0,
+            reversibility=2.0,
+            uncertainty=0.5,
+        ),
+        calculated_score=60.0,
+    )
+
+    comp = compound_risk_factors_logarithmic(primary, [sec_finding], env_crit=5.0)
+    assert comp.change_impact == 4.0
+    assert comp.reversibility == 4.5
+    assert comp.environment_criticality == 5.0
+    assert 1.0 < comp.security_exposure < 5.0
+    assert comp.uncertainty > 0.0

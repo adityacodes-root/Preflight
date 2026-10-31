@@ -12,7 +12,7 @@ terraform show -json tfplan | preflight analyze - --fail-on high
 ```
 
 * **Zero-Disk Streaming**: Ingest plans via stdin pipe (`analyze -`) so unencrypted plan secrets never touch the runner disk.
-* **Deterministic Risk Scoring**: Logarithmic blast-radius calculation across 5 weighted dimensions with environment criticality tiers.
+* **Deterministic Risk Scoring**: Normalized 5-factor risk model with environment criticality tiers.
 * **Multi-Cloud Policy Suite**: Built-in detection rules for AWS, Azure, Google Cloud, Kubernetes, and core Terraform lifecycle actions.
 * **CI/CD Native Gate**: Enforces POSIX exit codes (`0` Pass, `1` Block, `2` Error), posts GitHub PR sticky comments, and exports SARIF v2.1.0.
 
@@ -163,9 +163,9 @@ $$\text{Score} = \sum_{i} \left( \text{Weight}_i \times \frac{\text{Factor Score
 - `0 – 24.9`: **Low** (tag updates, read-only data sources, benign attribute changes)
 - `25 – 49.9`: **Moderate** (scoped additions, non-destructive replacements)
 - `50 – 74.9`: **High** (recreations, destructive storage operations, broad IAM policies)
-- `75 – 100.0`: **Critical** (public SSH/RDP, disabled S3 access blocks, DB deletion)
+- `75 – 100.0`: **Critical** (public SSH/RDP, disabled S3 access blocks, production DB deletion)
 
-Overall plan risk is calculated as the maximum resource-level risk score to prevent critical issues from being masked by volume of benign changes.
+Overall plan risk is driven by the highest-risk resource to prevent critical issues from being masked by a large volume of benign changes. When a resource triggers multiple rules, the dominant finding sets the baseline, while secondary findings contribute diminishing increments to avoid artificial score inflation.
 
 ---
 
